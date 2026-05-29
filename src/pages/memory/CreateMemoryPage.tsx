@@ -6,10 +6,10 @@ import type { Mood } from '@/types/entry.types'
 import dayjs from '@/lib/dayjs'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const MAX_FILE_SIZE_MB = 12
+const MAX_FILE_SIZE_MB = 5
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
-const COMPRESS_MAX_DIMENSION = 1920   // px – long edge after compression
-const COMPRESS_TARGET_BYTES = 4 * 1024 * 1024   // 4 MB
+const COMPRESS_MAX_DIMENSION = 1920
+const COMPRESS_TARGET_BYTES = 4.5 * 1024 * 1024   // 4.5 MB — ต่ำกว่า backend limit นิดนึง
 const COMPRESS_QUALITY = 0.85
 
 // ─── Image compression helper ─────────────────────────────────────────────────
