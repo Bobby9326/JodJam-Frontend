@@ -17,8 +17,11 @@ import s09 from '@/assets/images/samples/sample-09.jpg'
 import s10 from '@/assets/images/samples/sample-10.jpg'
 import s11 from '@/assets/images/samples/sample-11.jpg'
 import s12 from '@/assets/images/samples/sample-12.jpg'
+import s13 from '@/assets/images/samples/sample-13.jpg'
+import s14 from '@/assets/images/samples/sample-14.jpg'
 
-const SAMPLES = [s01,s02,s03,s04,s05,s06,s07,s08,s09,s10,s11,s12]
+
+const SAMPLES = [s01,s02,s03,s04,s05,s06,s07,s08,s09,s10,s11,s12,s13,s14]
 const VISIBLE = 6
 
 const MOODS: { value: Mood; th: string; en: string }[] = [
