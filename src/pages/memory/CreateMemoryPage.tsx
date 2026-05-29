@@ -126,9 +126,16 @@ export function CreateMemoryPage() {
   const onDrop = useCallback(async (accepted: File[], rejected: any[]) => {
     setFileError(null)
 
-    // Handle dropzone rejections (wrong type etc.)
     if (rejected.length > 0) {
-      setFileError('ไฟล์ไม่ถูกต้อง — รองรับเฉพาะ JPG, PNG, WebP')
+      const error = rejected[0]?.errors?.[0]
+      if (error?.code === 'file-too-large') {
+        const sizeMB = (rejected[0].file.size / 1024 / 1024).toFixed(1)
+        setFileError(`ไฟล์ใหญ่เกินไป — ขนาดสูงสุด ${MAX_FILE_SIZE_MB} MB (ไฟล์นี้ ${sizeMB} MB)`)
+      } else if (error?.code === 'file-invalid-type') {
+        setFileError('ไฟล์ไม่ถูกต้อง — รองรับเฉพาะ JPG, PNG, WebP')
+      } else {
+        setFileError('ไม่สามารถใช้ไฟล์นี้ได้ กรุณาลองใหม่')
+      }
       return
     }
 
