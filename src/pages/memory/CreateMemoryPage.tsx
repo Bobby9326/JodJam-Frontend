@@ -1,9 +1,53 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import { useCreateMemory } from '@/hooks/useEntries'
 import type { Mood } from '@/types/entry.types'
 import dayjs from '@/lib/dayjs'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const MAX_FILE_SIZE_MB = 12
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+const COMPRESS_MAX_DIMENSION = 1920   // px – long edge after compression
+const COMPRESS_TARGET_BYTES = 4 * 1024 * 1024   // 4 MB
+const COMPRESS_QUALITY = 0.85
+
+// ─── Image compression helper ─────────────────────────────────────────────────
+async function compressImage(file: File): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+
+      let { naturalWidth: w, naturalHeight: h } = img
+      if (w > COMPRESS_MAX_DIMENSION || h > COMPRESS_MAX_DIMENSION) {
+        if (w >= h) { h = Math.round((h / w) * COMPRESS_MAX_DIMENSION); w = COMPRESS_MAX_DIMENSION }
+        else         { w = Math.round((w / h) * COMPRESS_MAX_DIMENSION); h = COMPRESS_MAX_DIMENSION }
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+
+      // Try progressively lower quality until under target size
+      let quality = COMPRESS_QUALITY
+      const tryBlob = (q: number) => {
+        canvas.toBlob(blob => {
+          if (!blob) { reject(new Error('Canvas toBlob failed')); return }
+          if (blob.size > COMPRESS_TARGET_BYTES && q > 0.5) {
+            tryBlob(q - 0.1)
+          } else {
+            resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }))
+          }
+        }, 'image/jpeg', q)
+      }
+      tryBlob(quality)
+    }
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Image load failed')) }
+    img.src = objectUrl
+  })
+}
 
 import s01 from '@/assets/images/samples/sample-01.jpg'
 import s02 from '@/assets/images/samples/sample-02.jpg'
@@ -47,24 +91,83 @@ export function CreateMemoryPage() {
 
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
+  const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null)  // track for cleanup
   const [selectedSample, setSelectedSample] = useState<number | null>(null)
   const [note, setNote] = useState('')
   const [mood, setMood] = useState<Mood | null>(null)
   const [rating, setRating] = useState(0)
   const [hoverRating, setHoverRating] = useState(0)
   const [sampleOffset, setSampleOffset] = useState(0)
+  const [fileError, setFileError] = useState<string | null>(null)
+  const [isCompressing, setIsCompressing] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
-  const onDrop = useCallback((accepted: File[]) => {
-    const f = accepted[0]; if (!f) return
-    setFile(f); setPreview(URL.createObjectURL(f)); setSelectedSample(null)
+  // ── Cleanup object URL on unmount or when preview changes ──────────────────
+  useEffect(() => {
+    return () => { if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl) }
+  }, [previewObjectUrl])
+
+  // ── Prefetch all sample images when component mounts ───────────────────────
+  useEffect(() => {
+    SAMPLES.forEach(src => {
+      const link = document.createElement('link')
+      link.rel = 'prefetch'; link.as = 'image'; link.href = src
+      document.head.appendChild(link)
+    })
   }, [])
 
+  // ── Helper: set preview with cleanup of previous object URL ────────────────
+  const setPreviewWithCleanup = (url: string | null, isObjectUrl = false) => {
+    if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl)
+    setPreview(url)
+    setPreviewObjectUrl(isObjectUrl ? url : null)
+  }
+
+  const onDrop = useCallback(async (accepted: File[], rejected: any[]) => {
+    setFileError(null)
+
+    // Handle dropzone rejections (wrong type etc.)
+    if (rejected.length > 0) {
+      setFileError('ไฟล์ไม่ถูกต้อง — รองรับเฉพาะ JPG, PNG, WebP')
+      return
+    }
+
+    const f = accepted[0]; if (!f) return
+
+    // Validate size before compression
+    if (f.size > MAX_FILE_SIZE_BYTES) {
+      setFileError(`ไฟล์ใหญ่เกินไป — ขนาดสูงสุด ${MAX_FILE_SIZE_MB} MB (ไฟล์นี้ ${(f.size / 1024 / 1024).toFixed(1)} MB)`)
+      return
+    }
+
+    // Show preview immediately, then compress in background
+    const tempUrl = URL.createObjectURL(f)
+    setPreviewWithCleanup(tempUrl, true)
+    setSelectedSample(null)
+    setIsCompressing(true)
+
+    try {
+      const compressed = await compressImage(f)
+      setFile(compressed)
+    } catch {
+      setFileError('ไม่สามารถประมวลผลรูปได้ กรุณาลองใหม่')
+      setPreviewWithCleanup(null)
+    } finally {
+      setIsCompressing(false)
+    }
+  }, [previewObjectUrl])
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop, accept: { 'image/jpeg': [], 'image/png': [], 'image/webp': [] }, maxFiles: 1,
+    onDrop,
+    accept: { 'image/jpeg': [], 'image/png': [], 'image/webp': [] },
+    maxFiles: 1,
+    maxSize: MAX_FILE_SIZE_BYTES,
   })
 
   const selectSample = (src: string, idx: number) => {
-    setSelectedSample(idx); setPreview(src)
+    setFileError(null)
+    setSelectedSample(idx)
+    setPreviewWithCleanup(src, false)   // sample src is a module import, not an object URL
     const img = new Image()
     img.onload = () => {
       const canvas = document.createElement('canvas')
@@ -83,10 +186,20 @@ export function CreateMemoryPage() {
 
   const handleSubmit = () => {
     if (!file || !note.trim() || !mood || !rating) return
-    mutate({ file, note, mood, rating }, { onSuccess: () => navigate('/') })
+    setUploadError(null)
+    mutate(
+      { file, note, mood, rating },
+      {
+        onSuccess: () => navigate('/'),
+        onError: (err: any) => {
+          const msg = err?.message ?? 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง'
+          setUploadError(msg)
+        },
+      }
+    )
   }
 
-  const isReady = file && note.trim() && mood && rating > 0
+  const isReady = file && note.trim() && mood && rating > 0 && !isCompressing
 
   return (
     <div style={{ minHeight: '100vh', background: '#FAF3E4', paddingBottom: '60px' }}>
@@ -118,24 +231,38 @@ export function CreateMemoryPage() {
           </p>
 
           <div {...getRootProps()} style={{
-            border: `2px dashed ${isDragActive ? '#3B2A1A' : 'rgba(59,42,26,0.22)'}`,
+            border: `2px dashed ${isDragActive ? '#3B2A1A' : fileError ? '#C0392B' : 'rgba(59,42,26,0.22)'}`,
             borderRadius: '8px', aspectRatio: '16/9',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer', overflow: 'hidden',
             background: isDragActive ? 'rgba(59,42,26,0.03)' : 'transparent',
             transition: 'all 0.2s',
+            position: 'relative',
           }}>
             <input {...getInputProps()} />
             {preview ? (
-              <img src={preview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <>
+                <img src={preview} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                {isCompressing && (
+                  <div style={{
+                    position: 'absolute', inset: 0, background: 'rgba(250,243,228,0.75)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '8px',
+                  }}>
+                    <p style={{ fontSize: '13px', color: '#3B2A1A', letterSpacing: '0.1em' }}>COMPRESSING...</p>
+                  </div>
+                )}
+              </>
             ) : (
               <div style={{ textAlign: 'center', padding: '24px' }}>
                 <p style={{ color: '#3B2A1A', fontSize: '15px', marginBottom: '8px' }}>ลากรูปมาวาง หรือคลิกเพื่อเลือก</p>
                 <p style={{ color: '#A8896A', fontSize: '11px', letterSpacing: '0.15em' }}>DRAG & DROP – OR CLICK TO BROWSE</p>
-                <p style={{ color: '#A8896A', fontSize: '11px', letterSpacing: '0.15em', marginTop: '4px' }}>JPG · PNG · UP TO 12MB</p>
+                <p style={{ color: '#A8896A', fontSize: '11px', letterSpacing: '0.15em', marginTop: '4px' }}>JPG · PNG · WebP · UP TO {MAX_FILE_SIZE_MB}MB</p>
               </div>
             )}
           </div>
+          {fileError && (
+            <p style={{ fontSize: '12px', color: '#C0392B', marginTop: '8px', letterSpacing: '0.05em' }}>⚠ {fileError}</p>
+          )}
 
           {/* Sample strip */}
           <div style={{ marginTop: '16px' }}>
@@ -221,6 +348,9 @@ export function CreateMemoryPage() {
 
           {/* Submit — ชิดล่าง */}
           <div style={{ marginTop: 'auto', paddingTop: '8px' }}>
+            {uploadError && (
+              <p style={{ fontSize: '12px', color: '#C0392B', marginBottom: '10px', letterSpacing: '0.05em' }}>⚠ {uploadError}</p>
+            )}
             <button onClick={handleSubmit} disabled={!isReady || isPending} style={{
               width: '100%', background: '#3B2A1A', color: '#FAF3E4',
               border: 'none', borderRadius: '999px', padding: '16px',
@@ -228,7 +358,7 @@ export function CreateMemoryPage() {
               cursor: isReady ? 'pointer' : 'not-allowed', opacity: isReady ? 1 : 0.35,
               fontFamily: '"DM Sans", sans-serif', transition: 'opacity 0.2s',
             }}>
-              {isPending ? 'กำลังบันทึก...' : 'บันทึก · Save Memory'}
+              {isPending ? 'กำลังบันทึก...' : isCompressing ? 'กำลังประมวลผลรูป...' : 'บันทึก · Save Memory'}
             </button>
             <p style={{ fontSize: '12px', color: '#A8896A', marginTop: '10px', opacity: 0.65 }}>
               ⚠ once saved, this memory cannot be edited or deleted.
