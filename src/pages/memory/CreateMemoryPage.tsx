@@ -8,9 +8,9 @@ import dayjs from '@/lib/dayjs'
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_FILE_SIZE_MB = 5
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
-const COMPRESS_MAX_DIMENSION = 1920
-const COMPRESS_TARGET_BYTES = 4.5 * 1024 * 1024   // 4.5 MB — ต่ำกว่า backend limit นิดนึง
-const COMPRESS_QUALITY = 0.85
+const COMPRESS_MAX_DIMENSION = 1920   // px – long edge after compression
+const COMPRESS_QUALITY = 0.85         // JPEG quality after compression
+const COMPRESS_TARGET_BYTES = 4.5 * 1024 * 1024  // aim for ≤ 4.5 MB (backend limit 5 MB)
 
 // ─── Image compression helper ─────────────────────────────────────────────────
 async function compressImage(file: File): Promise<File> {
@@ -167,15 +167,26 @@ export function CreateMemoryPage() {
   const selectSample = (src: string, idx: number) => {
     setFileError(null)
     setSelectedSample(idx)
-    setPreviewWithCleanup(src, false)   // sample src is a module import, not an object URL
+    setPreviewWithCleanup(src, false)
+    setIsCompressing(true)
+
     const img = new Image()
     img.onload = () => {
       const canvas = document.createElement('canvas')
       canvas.width = img.naturalWidth; canvas.height = img.naturalHeight
       canvas.getContext('2d')!.drawImage(img, 0, 0)
-      canvas.toBlob(blob => {
-        if (blob) setFile(new File([blob], `sample-${idx+1}.jpg`, { type: 'image/jpeg' }))
-      }, 'image/jpeg', 0.9)
+      canvas.toBlob(async blob => {
+        if (!blob) { setIsCompressing(false); return }
+        try {
+          const raw = new File([blob], `sample-${idx+1}.jpg`, { type: 'image/jpeg' })
+          const compressed = await compressImage(raw)
+          setFile(compressed)
+        } catch {
+          setFileError('ไม่สามารถประมวลผลรูปได้ กรุณาลองใหม่')
+        } finally {
+          setIsCompressing(false)
+        }
+      }, 'image/jpeg', 1.0)
     }
     img.src = src
   }
