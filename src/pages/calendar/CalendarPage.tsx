@@ -22,6 +22,7 @@ const WEEKDAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 
 export function CalendarPage() {
   const currentYear = dayjs().year()
+  const { data: currentYearData } = useCalendar(currentYear)
   const [year, setYear] = useState(currentYear)
   const { data, isLoading } = useCalendar(year)
   const navigate = useNavigate()
@@ -32,8 +33,8 @@ export function CalendarPage() {
   const recordRate = ((totalRecorded / totalDays) * 100).toFixed(2)
   const rollNum = String(year).slice(-2)
   const isCurrentYear = year === currentYear
-  const todayHasEntry = data
-    ? Object.values(data).flat().some((d: DayEntry) => d.date === today && d.has_entry)
+  const todayHasEntry = currentYearData
+    ? Object.values(currentYearData).flat().some((d: DayEntry) => d.date === today && d.has_entry)
     : false
 
   return (
